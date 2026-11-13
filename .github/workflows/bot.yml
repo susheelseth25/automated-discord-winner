@@ -22,7 +22,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Debug secret
+        run: |
+          echo "Token length: ${#TOKEN}"
+          if [ ${#TOKEN} -lt 50 ]; then
+            echo "ERROR: Token is empty or too short"
+            exit 1
+          fi
+        env:
+          TOKEN: ${{ secrets.DISCORD_TOKEN }}
+
       - name: Run Discord bot
         env:
-          TOKEN: ${{ secrets.TOKEN }}
+          TOKEN: ${{ secrets.DISCORD_TOKEN }}
         run: python bot.py
