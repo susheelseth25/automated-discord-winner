@@ -1,0 +1,28 @@
+name: Discord Bot
+
+on:
+  workflow_dispatch:          # Manual trigger
+  schedule:
+    - cron: '0 */6 * * *'     # Restart every 6 hours (adjust as needed)
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360      # Max 6 hours on free tier
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Discord bot
+        env:
+          TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        run: python bot.py
