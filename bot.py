@@ -27,15 +27,14 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 intents.voice_states = True
+intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# State
 registered_players = set()
 event_end_time = None
 draw_done = False
 
-# ---------- Persistence ----------
 def save_state():
     data = {
         "registered_players": list(registered_players),
@@ -59,11 +58,10 @@ def load_state():
         end_str = data.get("event_end_time")
         event_end_time = datetime.fromisoformat(end_str) if end_str else None
         draw_done = data.get("draw_done", False)
-        print(f"Loaded state: {len(registered_players)} players, end={event_end_time}, done={draw_done}")
+        print(f"Loaded state: {len(registered_players)} players")
     except Exception as e:
         print("Failed to load state:", e)
 
-# Dummy server for Render / GitHub Actions free plan
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -74,7 +72,6 @@ class DummyHandler(BaseHTTPRequestHandler):
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
-    print(f"Dummy server on port {port}")
     HTTPServer(("0.0.0.0", port), DummyHandler).serve_forever()
 
 Thread(target=run_web, daemon=True).start()
@@ -106,23 +103,41 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
     check_event_end.start()
+    # Join any existing threads in the Apollo channel
+    channel = bot.get_channel(APOLLO_CHANNEL_ID)
+    if channel:
+        try:
+            threads = channel.threads
+            for thread in threads:
+                await thread.join()
+                print(f"Joined thread: {thread.name}")
+        except Exception as e:
+            print("Could not join threads:", e)
+
+@bot.event
+async def on_thread_create(thread):
+    if thread.parent_id == APOLLO_CHANNEL_ID:
+        try:
+            await thread.join()
+            print(f"Joined new thread: {thread.name}")
+        except Exception as e:
+            print("Failed to join thread:", e)
 
 @bot.event
 async def on_message(message):
     global registered_players, event_end_time, draw_done
-    if message.channel.id != APOLLO_CHANNEL_ID or message.author.id != APOLLO_BOT_ID:
+    # Allow commands everywhere in the Apollo channel or its threads
+    if message.channel.id == APOLLO_CHANNEL_ID or (isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID):
         await bot.process_commands(message)
-        return
 
-    # New Apollo reminder that tags registered players
-    if message.mentions and ("REMINDER" in message.content.upper() or "starting" in message.content.lower()):
-        registered_players = {m.id for m in message.mentions}
-        draw_done = False
-        event_end_time = parse_end_time(message.content)
-        save_state()
-        print(f"New event captured: {len(registered_players)} players, ends at {event_end_time}")
-
-    await bot.process_commands(message)
+    # Capture from Apollo reminder inside thread or channel
+    if message.author.id == APOLLO_BOT_ID and message.mentions:
+        if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
+            registered_players = {m.id for m in message.mentions}
+            draw_done = False
+            event_end_time = parse_end_time(message.content)
+            save_state()
+            print(f"Captured {len(registered_players)} players from reminder")
 
 @tasks.loop(minutes=1)
 async def check_event_end():
@@ -139,7 +154,6 @@ async def run_draw():
     if not channel:
         return
 
-    # Players who registered AND are currently in ABCD voice
     present = set()
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
@@ -168,12 +182,9 @@ async def run_draw():
     )
     draw_done = True
     save_state()
-    print(f"Drew {winners_count} winners from {len(present)} present players")
 
 @bot.command()
 async def status(ctx):
-    if ctx.channel.id != APOLLO_CHANNEL_ID:
-        return
     present = 0
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
@@ -187,14 +198,10 @@ async def status(ctx):
 
 @bot.command()
 async def forcedraw(ctx):
-    if ctx.channel.id != APOLLO_CHANNEL_ID:
-        return
     await run_draw()
 
 @bot.command()
 async def reset(ctx):
-    if ctx.channel.id != APOLLO_CHANNEL_ID:
-        return
     global registered_players, event_end_time, draw_done
     registered_players = set()
     event_end_time = None
