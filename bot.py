@@ -103,6 +103,15 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
     check_event_end.start()
+    channel = bot.get_channel(APOLLO_CHANNEL_ID)
+    if channel:
+        try:
+            threads = channel.threads
+            for thread in threads:
+                await thread.join()
+                print(f"Joined thread: {thread.name}")
+        except Exception as e:
+            print("Could not join threads:", e)
 
 @bot.event
 async def on_thread_create(thread):
@@ -116,11 +125,9 @@ async def on_thread_create(thread):
 @bot.event
 async def on_message(message):
     global registered_players, event_end_time, draw_done
-    # Process commands in Apollo channel or its threads
     if message.channel.id == APOLLO_CHANNEL_ID or (isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID):
         await bot.process_commands(message)
 
-    # Capture registered players from Apollo reminder (inside thread or channel)
     if message.author.id == APOLLO_BOT_ID and message.mentions:
         if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
             registered_players = {m.id for m in message.mentions}
@@ -185,6 +192,19 @@ async def status(ctx):
         f"Registered: {len(registered_players)} | Present in ABCD: {present} | "
         f"End time: {end_str} | Draw done: {draw_done}"
     )
+
+@bot.command()
+async def voices(ctx):
+    """Check which voice channels the bot can see"""
+    lines = []
+    for vc_id in VOICE_CHANNELS:
+        vc = bot.get_channel(vc_id)
+        if vc and isinstance(vc, discord.VoiceChannel):
+            members = len(vc.members)
+            lines.append(f"✅ {vc.name} — {members} member(s)")
+        else:
+            lines.append(f"❌ Cannot see channel ID {vc_id}")
+    await ctx.send("**Voice Channel Access:**\n" + "\n".join(lines))
 
 @bot.command()
 async def forcedraw(ctx):
