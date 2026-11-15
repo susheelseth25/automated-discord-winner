@@ -31,7 +31,7 @@ intents.voice_states = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # State
-registered_players = set()          # set of user IDs
+registered_players = set()
 event_end_time = None
 draw_done = False
 
@@ -63,7 +63,7 @@ def load_state():
     except Exception as e:
         print("Failed to load state:", e)
 
-# Dummy server for Render free plan
+# Dummy server for Render / GitHub Actions free plan
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -111,6 +111,7 @@ async def on_ready():
 async def on_message(message):
     global registered_players, event_end_time, draw_done
     if message.channel.id != APOLLO_CHANNEL_ID or message.author.id != APOLLO_BOT_ID:
+        await bot.process_commands(message)
         return
 
     # New Apollo reminder that tags registered players
@@ -120,6 +121,8 @@ async def on_message(message):
         event_end_time = parse_end_time(message.content)
         save_state()
         print(f"New event captured: {len(registered_players)} players, ends at {event_end_time}")
+
+    await bot.process_commands(message)
 
 @tasks.loop(minutes=1)
 async def check_event_end():
@@ -184,14 +187,12 @@ async def status(ctx):
 
 @bot.command()
 async def forcedraw(ctx):
-    """Emergency manual draw"""
     if ctx.channel.id != APOLLO_CHANNEL_ID:
         return
     await run_draw()
 
 @bot.command()
 async def reset(ctx):
-    """Clear current event state"""
     if ctx.channel.id != APOLLO_CHANNEL_ID:
         return
     global registered_players, event_end_time, draw_done
