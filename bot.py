@@ -34,6 +34,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 registered_players = set()
 event_end_time = None
 draw_done = False
+bot_start_time = None
 
 def save_state():
     data = {
@@ -100,27 +101,24 @@ def parse_end_time(content: str):
 
 @bot.event
 async def on_ready():
+    global bot_start_time
     print(f"Logged in as {bot.user}")
+    bot_start_time = datetime.now(timezone.utc)
     load_state()
     check_event_end.start()
-    channel = bot.get_channel(APOLLO_CHANNEL_ID)
-    if channel:
-        try:
-            threads = channel.threads
-            for thread in threads:
-                await thread.join()
-                print(f"Joined thread: {thread.name}")
-        except Exception as e:
-            print("Could not join threads:", e)
 
 @bot.event
 async def on_thread_create(thread):
-    if thread.parent_id == APOLLO_CHANNEL_ID:
-        try:
-            await thread.join()
-            print(f"Joined new thread: {thread.name}")
-        except Exception as e:
-            print("Failed to join thread:", e)
+    # Only join threads created AFTER the bot started
+    if thread.parent_id != APOLLO_CHANNEL_ID:
+        return
+    if bot_start_time and thread.created_at < bot_start_time:
+        return  # Ignore old threads
+    try:
+        await thread.join()
+        print(f"Joined new thread: {thread.name}")
+    except Exception as e:
+        print("Failed to join thread:", e)
 
 @bot.event
 async def on_message(message):
@@ -192,19 +190,6 @@ async def status(ctx):
         f"Registered: {len(registered_players)} | Present in ABCD: {present} | "
         f"End time: {end_str} | Draw done: {draw_done}"
     )
-
-@bot.command()
-async def voices(ctx):
-    """Check which voice channels the bot can see"""
-    lines = []
-    for vc_id in VOICE_CHANNELS:
-        vc = bot.get_channel(vc_id)
-        if vc and isinstance(vc, discord.VoiceChannel):
-            members = len(vc.members)
-            lines.append(f"✅ {vc.name} — {members} member(s)")
-        else:
-            lines.append(f"❌ Cannot see channel ID {vc_id}")
-    await ctx.send("**Voice Channel Access:**\n" + "\n".join(lines))
 
 @bot.command()
 async def forcedraw(ctx):
