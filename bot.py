@@ -103,16 +103,6 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
     check_event_end.start()
-    # Join any existing threads in the Apollo channel
-    channel = bot.get_channel(APOLLO_CHANNEL_ID)
-    if channel:
-        try:
-            threads = channel.threads
-            for thread in threads:
-                await thread.join()
-                print(f"Joined thread: {thread.name}")
-        except Exception as e:
-            print("Could not join threads:", e)
 
 @bot.event
 async def on_thread_create(thread):
@@ -126,11 +116,11 @@ async def on_thread_create(thread):
 @bot.event
 async def on_message(message):
     global registered_players, event_end_time, draw_done
-    # Allow commands everywhere in the Apollo channel or its threads
+    # Process commands in Apollo channel or its threads
     if message.channel.id == APOLLO_CHANNEL_ID or (isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID):
         await bot.process_commands(message)
 
-    # Capture from Apollo reminder inside thread or channel
+    # Capture registered players from Apollo reminder (inside thread or channel)
     if message.author.id == APOLLO_BOT_ID and message.mentions:
         if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
             registered_players = {m.id for m in message.mentions}
