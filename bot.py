@@ -22,7 +22,6 @@ VOICE_CHANNELS = [
 
 MIN_PLAYERS = 12
 STATE_FILE = "bot_state.json"
-IST = timezone(timedelta(hours=5, minutes=30))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -78,9 +77,13 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 def parse_end_time(content: str):
-    time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', content, re.IGNORECASE)
+    time_section = re.search(r'Time\s*[:\n]?\s*(.+)', content, re.IGNORECASE | re.DOTALL)
+    search_text = time_section.group(1) if time_section else content
+
+    time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', search_text, re.IGNORECASE)
     if not time_match:
         return None
+
     start_str = time_match.group(1).strip().upper()
     try:
         start_dt = datetime.strptime(start_str, "%I:%M %p")
@@ -89,10 +92,12 @@ def parse_end_time(content: str):
             start_dt = datetime.strptime(start_str, "%H:%M")
         except ValueError:
             return None
-    now = datetime.now(IST)
+
+    now = datetime.now()
     start_time = now.replace(hour=start_dt.hour, minute=start_dt.minute, second=0, microsecond=0)
     if start_time < now:
         start_time += timedelta(days=1)
+
     return start_time + timedelta(minutes=90)
 
 async def scan_recent_events():
@@ -108,7 +113,7 @@ async def scan_recent_events():
                     event_end_time = end_time
                     draw_done = False
                     save_state()
-                    end_str = end_time.strftime("%H:%M IST")
+                    end_str = end_time.strftime("%H:%M")
                     await channel.send(
                         f"⏰ **Found recent event.** End time set to {end_str} (start + 90 min)"
                     )
@@ -122,7 +127,7 @@ async def announce_capture(count, end_time):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
-    end_str = end_time.strftime("%H:%M IST") if end_time else "Not set"
+    end_str = end_time.strftime("%H:%M") if end_time else "Not set"
     await channel.send(
         f"✅ **Captured {count} registered players** from the new thread.\n"
         f"End time: {end_str}"
@@ -184,7 +189,7 @@ async def on_message(message):
             event_end_time = end_time
             draw_done = False
             save_state()
-            end_str = end_time.strftime("%H:%M IST")
+            end_str = end_time.strftime("%H:%M")
             await message.channel.send(
                 f"⏰ **Event detected.** End time set to {end_str} (start + 90 min)"
             )
@@ -211,7 +216,7 @@ async def check_event_end():
     global draw_done
     if not registered_players or draw_done or not event_end_time:
         return
-    now = datetime.now(IST)
+    now = datetime.now()
     if now >= event_end_time:
         await run_draw()
 
@@ -251,13 +256,27 @@ async def connect(ctx):
     await ctx.send("Connected! Bot is online and responding.")
 
 @bot.command()
+async def stop(ctx):
+    await ctx.send("🛑 Bot is stopping...")
+    await bot.close()
+
+@bot.command()
+async def start(ctx):
+    await ctx.send("ℹ️ Ask bot admin to restart webserver.")
+
+@bot.command()
+async def restart(ctx):
+    await ctx.send("🔄 Bot is restarting... Ask bot admin to restart webserver.")
+    await bot.close()
+
+@bot.command()
 async def status(ctx):
     voice_count = 0
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
         if vc and isinstance(vc, discord.VoiceChannel):
             voice_count += len(vc.members)
-    end_str = event_end_time.strftime("%H:%M IST") if event_end_time else "Not set"
+    end_str = event_end_time.strftime("%H:%M") if event_end_time else "Not set"
     await ctx.send(
         f"Registered: {len(registered_players)} | In Voice (ABCD): {voice_count} | "
         f"End time: {end_str} | Draw done: {draw_done}"
