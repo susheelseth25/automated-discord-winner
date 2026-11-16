@@ -99,63 +99,48 @@ def parse_end_time(content: str):
         end_time += timedelta(days=1)
     return end_time
 
-async def check_thread_for_reminder(thread):
+async def scan_thread(thread):
     global registered_players, event_end_time, draw_done
     try:
-        async for message in thread.history(limit=15):
+        async for message in thread.history(limit=10):
             if message.author.id == APOLLO_BOT_ID and message.mentions:
-                content_upper = message.content.upper()
-                if "REMINDER" in content_upper or "STARTING" in content_upper:
+                if "REMINDER" in message.content.upper() or "STARTING" in message.content.upper():
                     registered_players = {m.id for m in message.mentions}
                     draw_done = False
                     event_end_time = parse_end_time(message.content)
                     save_state()
-                    print(f"SUCCESS: Captured {len(registered_players)} players from thread '{thread.name}'")
-                    return True
-        print(f"No reminder found in thread: {thread.name}")
+                    print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
+                    return
+        print(f"No reminder found in: {thread.name}")
     except Exception as e:
-        print(f"Error reading thread {thread.name}: {e}")
-    return False
+        print(f"Scan error for {thread.name}: {e}")
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
-    check_event_end.start()
-    print("Bot ready. Waiting for new Apollo threads...")
+    if not check_event_end.is_running():
+        check_event_end.start()
+    print("Ready. Listening for new threads...")
 
 @bot.event
 async def on_thread_create(thread):
+    print(f"Thread created: {thread.name} (parent: {thread.parent_id})")
     if thread.parent_id != APOLLO_CHANNEL_ID:
         return
     try:
         await thread.join()
-        print(f"Joined new thread: {thread.name}")
-        await asyncio.sleep(8)  # Give Apollo time to post the reminder
-        await check_thread_for_reminder(thread)
+        print(f"Joined thread: {thread.name}")
+        await asyncio.sleep(10)
+        await scan_thread(thread)
     except Exception as e:
-        print(f"Failed to process new thread {thread.name}: {e}")
+        print(f"Thread join/scan failed: {e}")
 
 @bot.event
 async def on_message(message):
-    if message.author == bot.user:
+    if message.author.bot:
         return
-
-    # Process commands
-    if message.channel.id == APOLLO_CHANNEL_ID or (
-        isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID
-    ):
-        await bot.process_commands(message)
-
-    # Live capture if reminder is posted while bot is in the thread
-    if message.author.id == APOLLO_BOT_ID and message.mentions:
-        if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
-            global registered_players, event_end_time, draw_done
-            registered_players = {m.id for m in message.mentions}
-            draw_done = False
-            event_end_time = parse_end_time(message.content)
-            save_state()
-            print(f"Live capture: {len(registered_players)} players")
+    await bot.process_commands(message)
 
 @tasks.loop(minutes=1)
 async def check_event_end():
@@ -185,26 +170,21 @@ async def run_draw():
             f"Event ended. Only {len(present)} registered players were in voice "
             f"(minimum required: {MIN_PLAYERS}). No winners posted."
         )
-        draw_done = True
-        save_state()
-        return
-
-    winners_count = max(1, len(present) // 3)
-    winners = random.sample(list(present), min(winners_count, len(present)))
-    mentions = " ".join(w.mention for w in winners)
-
-    await channel.send(
-        f"🎉 **Event Winners** 🎉\n"
-        f"Valid players in voice: {len(present)}\n"
-        f"Winners ({winners_count}): {mentions}"
-    )
+    else:
+        winners_count = max(1, len(present) // 3)
+        winners = random.sample(list(present), min(winners_count, len(present)))
+        mentions = " ".join(w.mention for w in winners)
+        await channel.send(
+            f"🎉 **Event Winners** 🎉\n"
+            f"Valid players in voice: {len(present)}\n"
+            f"Winners ({winners_count}): {mentions}"
+        )
     draw_done = True
     save_state()
-    print(f"Drew {winners_count} winners")
 
 @bot.command()
 async def connect(ctx):
-    await ctx.send("Connected! Bot can see Apollo events")
+    await ctx.send("Connected! Bot is online and responding.")
 
 @bot.command()
 async def status(ctx):
