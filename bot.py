@@ -113,8 +113,17 @@ def parse_end_time(content: str):
         if start_time < now:
             start_time += timedelta(days=1)
         return start_time + timedelta(hours=2)
-
     return None
+
+async def announce_capture(count, end_time):
+    channel = bot.get_channel(APOLLO_CHANNEL_ID)
+    if not channel:
+        return
+    end_str = end_time.strftime("%H:%M IST") if end_time else "Not set"
+    await channel.send(
+        f"✅ **Captured {count} registered players** from the new thread.\n"
+        f"End time: {end_str}"
+    )
 
 async def scan_thread(thread):
     global registered_players, event_end_time, draw_done
@@ -127,8 +136,7 @@ async def scan_thread(thread):
                     event_end_time = parse_end_time(message.content)
                     save_state()
                     print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
-                    if event_end_time:
-                        print(f"End time set to: {event_end_time}")
+                    await announce_capture(len(registered_players), event_end_time)
                     return
         print(f"No reminder found in: {thread.name}")
     except Exception as e:
@@ -207,41 +215,37 @@ async def connect(ctx):
 
 @bot.command()
 async def status(ctx):
-    present = 0
+    voice_count = 0
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
         if vc and isinstance(vc, discord.VoiceChannel):
-            present += sum(1 for m in vc.members if m.id in registered_players)
+            voice_count += len(vc.members)
     end_str = event_end_time.strftime("%H:%M IST") if event_end_time else "Not set"
     await ctx.send(
-        f"Registered: {len(registered_players)} | Present in ABCD: {present} | "
+        f"Registered: {len(registered_players)} | In Voice (ABCD): {voice_count} | "
         f"End time: {end_str} | Draw done: {draw_done}"
     )
 
 @bot.command()
 async def details(ctx):
-    """Show names of registered players and who is in voice"""
     registered_names = []
-    present_names = []
-
     for uid in registered_players:
         member = ctx.guild.get_member(uid)
         name = member.display_name if member else f"User {uid}"
         registered_names.append(name)
+    reg_text = ", ".join(registered_names) if registered_names else "None"
 
+    voice_names = []
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
         if vc and isinstance(vc, discord.VoiceChannel):
             for member in vc.members:
-                if member.id in registered_players:
-                    present_names.append(f"{member.display_name} ({vc.name})")
-
-    reg_text = ", ".join(registered_names) if registered_names else "None"
-    present_text = ", ".join(present_names) if present_names else "None"
+                voice_names.append(f"{member.display_name} ({vc.name})")
+    voice_text = ", ".join(voice_names) if voice_names else "None"
 
     await ctx.send(
         f"**Registered ({len(registered_names)}):** {reg_text}\n"
-        f"**Present in ABCD ({len(present_names)}):** {present_text}"
+        f"**In Voice ABCD ({len(voice_names)}):** {voice_text}"
     )
 
 @bot.command()
