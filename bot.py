@@ -95,6 +95,32 @@ def parse_end_time(content: str):
         start_time += timedelta(days=1)
     return start_time + timedelta(minutes=90)
 
+async def scan_recent_events():
+    """On startup, look for the most recent Apollo event post and set end time"""
+    global event_end_time, draw_done
+    channel = bot.get_channel(APOLLO_CHANNEL_ID)
+    if not channel:
+        return
+    try:
+        async for message in channel.history(limit=30):
+            if message.author.id == APOLLO_BOT_ID and (
+                "TEAM" in message.content.upper() or "Time" in message.content
+            ):
+                end_time = parse_end_time(message.content)
+                if end_time:
+                    event_end_time = end_time
+                    draw_done = False
+                    save_state()
+                    end_str = end_time.strftime("%H:%M IST")
+                    await channel.send(
+                        f"⏰ **Found recent event.** End time set to {end_str} (start + 90 min)"
+                    )
+                    print(f"Startup scan set end time to: {end_time}")
+                    return
+        print("No recent Apollo event found in last 30 messages")
+    except Exception as e:
+        print(f"Startup scan error: {e}")
+
 async def announce_capture(count, end_time):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
@@ -128,6 +154,7 @@ async def on_ready():
     load_state()
     if not check_event_end.is_running():
         check_event_end.start()
+    await scan_recent_events()
     print("Ready. Listening for new threads and events...")
 
 @bot.event
@@ -152,7 +179,6 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
-    # Early detection from main channel event post
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID and 
         ("TEAM" in message.content.upper() or "Time" in message.content)):
@@ -167,7 +193,6 @@ async def on_message(message):
             )
             print(f"Early end time set to: {end_time}")
 
-    # Detect Apollo starting a thread
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
         print(f"Apollo started a thread message detected: {message.content}")
         channel = bot.get_channel(APOLLO_CHANNEL_ID)
