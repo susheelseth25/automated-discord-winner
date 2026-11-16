@@ -78,42 +78,26 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 def parse_end_time(content: str):
-    range_match = re.search(
-        r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)',
-        content,
-        re.IGNORECASE
-    )
-    if range_match:
-        end_str = range_match.group(2).strip().upper()
-        try:
-            end_dt = datetime.strptime(end_str, "%I:%M %p")
-        except ValueError:
-            try:
-                end_dt = datetime.strptime(end_str, "%H:%M")
-            except ValueError:
-                return None
-        now = datetime.now(IST)
-        end_time = now.replace(hour=end_dt.hour, minute=end_dt.minute, second=0, microsecond=0)
-        if end_time < now:
-            end_time += timedelta(days=1)
-        return end_time
+    # Always take the first time found as start time and add 90 minutes
+    time_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', content, re.IGNORECASE)
+    if not time_match:
+        return None
 
-    single_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', content, re.IGNORECASE)
-    if single_match:
-        start_str = single_match.group(1).strip().upper()
+    start_str = time_match.group(1).strip().upper()
+    try:
+        start_dt = datetime.strptime(start_str, "%I:%M %p")
+    except ValueError:
         try:
-            start_dt = datetime.strptime(start_str, "%I:%M %p")
+            start_dt = datetime.strptime(start_str, "%H:%M")
         except ValueError:
-            try:
-                start_dt = datetime.strptime(start_str, "%H:%M")
-            except ValueError:
-                return None
-        now = datetime.now(IST)
-        start_time = now.replace(hour=start_dt.hour, minute=start_dt.minute, second=0, microsecond=0)
-        if start_time < now:
-            start_time += timedelta(days=1)
-        return start_time + timedelta(hours=2)
-    return None
+            return None
+
+    now = datetime.now(IST)
+    start_time = now.replace(hour=start_dt.hour, minute=start_dt.minute, second=0, microsecond=0)
+    if start_time < now:
+        start_time += timedelta(days=1)
+
+    return start_time + timedelta(minutes=90)
 
 async def announce_capture(count, end_time):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
@@ -152,7 +136,7 @@ async def on_ready():
 
 @bot.event
 async def on_thread_create(thread):
-    print(f"Thread created: {thread.name} (parent: {thread.parent_id})")
+    print(f"on_thread_create fired: {thread.name}")
     if thread.parent_id != APOLLO_CHANNEL_ID:
         return
     try:
@@ -165,9 +149,27 @@ async def on_thread_create(thread):
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author.bot and message.author.id != APOLLO_BOT_ID:
         return
-    await bot.process_commands(message)
+
+    if not message.author.bot:
+        await bot.process_commands(message)
+
+    if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
+        print(f"Apollo started a thread message detected: {message.content}")
+        channel = bot.get_channel(APOLLO_CHANNEL_ID)
+        if channel:
+            try:
+                threads = await channel.guild.active_threads()
+                for thread in threads:
+                    if thread.parent_id == APOLLO_CHANNEL_ID:
+                        print(f"Found active thread: {thread.name}")
+                        await thread.join()
+                        await asyncio.sleep(8)
+                        await scan_thread(thread)
+                        break
+            except Exception as e:
+                print(f"Error fetching threads: {e}")
 
 @tasks.loop(minutes=1)
 async def check_event_end():
