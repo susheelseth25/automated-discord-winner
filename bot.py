@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import os
 import re
 import json
+import asyncio
 from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -98,6 +99,24 @@ def parse_end_time(content: str):
         end_time += timedelta(days=1)
     return end_time
 
+async def check_thread_for_reminder(thread):
+    """Scan recent messages in a thread for Apollo reminder"""
+    global registered_players, event_end_time, draw_done
+    try:
+        async for message in thread.history(limit=20):
+            if message.author.id == APOLLO_BOT_ID and message.mentions:
+                content_upper = message.content.upper()
+                if "REMINDER" in content_upper or "STARTING" in content_upper:
+                    registered_players = {m.id for m in message.mentions}
+                    draw_done = False
+                    event_end_time = parse_end_time(message.content)
+                    save_state()
+                    print(f"Captured {len(registered_players)} players from thread: {thread.name}")
+                    return True
+    except Exception as e:
+        print(f"Error reading thread {thread.name}: {e}")
+    return False
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
@@ -106,12 +125,11 @@ async def on_ready():
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if channel:
         try:
-            threads = channel.threads
-            for thread in threads:
+            for thread in channel.threads:
                 await thread.join()
-                print(f"Joined thread: {thread.name}")
+                await check_thread_for_reminder(thread)
         except Exception as e:
-            print("Could not join threads:", e)
+            print("Could not process threads:", e)
 
 @bot.event
 async def on_thread_create(thread):
@@ -119,8 +137,10 @@ async def on_thread_create(thread):
         try:
             await thread.join()
             print(f"Joined new thread: {thread.name}")
+            await asyncio.sleep(5)
+            await check_thread_for_reminder(thread)
         except Exception as e:
-            print("Failed to join thread:", e)
+            print("Failed to join/scan thread:", e)
 
 @bot.event
 async def on_message(message):
@@ -128,11 +148,9 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
-    # Process commands in the Apollo channel or its threads
     if message.channel.id == APOLLO_CHANNEL_ID or (isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID):
         await bot.process_commands(message)
 
-    # Capture Apollo reminder
     if message.author.id == APOLLO_BOT_ID and message.mentions:
         if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
             registered_players = {m.id for m in message.mentions}
