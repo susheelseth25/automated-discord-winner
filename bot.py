@@ -96,16 +96,13 @@ def parse_end_time(content: str):
     return start_time + timedelta(minutes=90)
 
 async def scan_recent_events():
-    """On startup, look for the most recent Apollo event post and set end time"""
     global event_end_time, draw_done
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
     try:
-        async for message in channel.history(limit=30):
-            if message.author.id == APOLLO_BOT_ID and (
-                "TEAM" in message.content.upper() or "Time" in message.content
-            ):
+        async for message in channel.history(limit=50):
+            if message.author.id == APOLLO_BOT_ID:
                 end_time = parse_end_time(message.content)
                 if end_time:
                     event_end_time = end_time
@@ -117,7 +114,7 @@ async def scan_recent_events():
                     )
                     print(f"Startup scan set end time to: {end_time}")
                     return
-        print("No recent Apollo event found in last 30 messages")
+        print("No recent Apollo event with a time found")
     except Exception as e:
         print(f"Startup scan error: {e}")
 
