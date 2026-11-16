@@ -100,10 +100,9 @@ def parse_end_time(content: str):
     return end_time
 
 async def check_thread_for_reminder(thread):
-    """Scan recent messages in a thread for Apollo reminder"""
     global registered_players, event_end_time, draw_done
     try:
-        async for message in thread.history(limit=20):
+        async for message in thread.history(limit=15):
             if message.author.id == APOLLO_BOT_ID and message.mentions:
                 content_upper = message.content.upper()
                 if "REMINDER" in content_upper or "STARTING" in content_upper:
@@ -111,8 +110,9 @@ async def check_thread_for_reminder(thread):
                     draw_done = False
                     event_end_time = parse_end_time(message.content)
                     save_state()
-                    print(f"Captured {len(registered_players)} players from thread: {thread.name}")
+                    print(f"SUCCESS: Captured {len(registered_players)} players from thread '{thread.name}'")
                     return True
+        print(f"No reminder found in thread: {thread.name}")
     except Exception as e:
         print(f"Error reading thread {thread.name}: {e}")
     return False
@@ -122,42 +122,40 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
     check_event_end.start()
-    channel = bot.get_channel(APOLLO_CHANNEL_ID)
-    if channel:
-        try:
-            for thread in channel.threads:
-                await thread.join()
-                await check_thread_for_reminder(thread)
-        except Exception as e:
-            print("Could not process threads:", e)
+    print("Bot ready. Waiting for new Apollo threads...")
 
 @bot.event
 async def on_thread_create(thread):
-    if thread.parent_id == APOLLO_CHANNEL_ID:
-        try:
-            await thread.join()
-            print(f"Joined new thread: {thread.name}")
-            await asyncio.sleep(5)
-            await check_thread_for_reminder(thread)
-        except Exception as e:
-            print("Failed to join/scan thread:", e)
+    if thread.parent_id != APOLLO_CHANNEL_ID:
+        return
+    try:
+        await thread.join()
+        print(f"Joined new thread: {thread.name}")
+        await asyncio.sleep(8)  # Give Apollo time to post the reminder
+        await check_thread_for_reminder(thread)
+    except Exception as e:
+        print(f"Failed to process new thread {thread.name}: {e}")
 
 @bot.event
 async def on_message(message):
-    global registered_players, event_end_time, draw_done
     if message.author == bot.user:
         return
 
-    if message.channel.id == APOLLO_CHANNEL_ID or (isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID):
+    # Process commands
+    if message.channel.id == APOLLO_CHANNEL_ID or (
+        isinstance(message.channel, discord.Thread) and message.channel.parent_id == APOLLO_CHANNEL_ID
+    ):
         await bot.process_commands(message)
 
+    # Live capture if reminder is posted while bot is in the thread
     if message.author.id == APOLLO_BOT_ID and message.mentions:
         if "REMINDER" in message.content.upper() or "starting" in message.content.lower():
+            global registered_players, event_end_time, draw_done
             registered_players = {m.id for m in message.mentions}
             draw_done = False
             event_end_time = parse_end_time(message.content)
             save_state()
-            print(f"Captured {len(registered_players)} players from reminder")
+            print(f"Live capture: {len(registered_players)} players")
 
 @tasks.loop(minutes=1)
 async def check_event_end():
@@ -202,10 +200,11 @@ async def run_draw():
     )
     draw_done = True
     save_state()
+    print(f"Drew {winners_count} winners")
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send("Pong! Bot can see messages.")
+    await ctx.send("Pong!")
 
 @bot.command()
 async def status(ctx):
@@ -226,8 +225,7 @@ async def voices(ctx):
     for vc_id in VOICE_CHANNELS:
         vc = bot.get_channel(vc_id)
         if vc and isinstance(vc, discord.VoiceChannel):
-            members = len(vc.members)
-            lines.append(f"✅ {vc.name} — {members} member(s)")
+            lines.append(f"✅ {vc.name} — {len(vc.members)} member(s)")
         else:
             lines.append(f"❌ Cannot see channel ID {vc_id}")
     await ctx.send("**Voice Channel Access:**\n" + "\n".join(lines))
