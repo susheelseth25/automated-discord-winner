@@ -203,8 +203,8 @@ async def run_draw():
     print(f"Drew {winners_count} winners")
 
 @bot.command()
-async def ping(ctx):
-    await ctx.send("Pong!")
+async def connect(ctx):
+    await ctx.send("Connected! Bot can see Apollo events")
 
 @bot.command()
 async def status(ctx):
