@@ -78,26 +78,43 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 def parse_end_time(content: str):
-    match = re.search(
+    range_match = re.search(
         r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)',
         content,
         re.IGNORECASE
     )
-    if not match:
-        return None
-    end_str = match.group(2).strip().upper()
-    try:
-        end_dt = datetime.strptime(end_str, "%I:%M %p")
-    except ValueError:
+    if range_match:
+        end_str = range_match.group(2).strip().upper()
         try:
-            end_dt = datetime.strptime(end_str, "%H:%M")
+            end_dt = datetime.strptime(end_str, "%I:%M %p")
         except ValueError:
-            return None
-    now = datetime.now(IST)
-    end_time = now.replace(hour=end_dt.hour, minute=end_dt.minute, second=0, microsecond=0)
-    if end_time < now:
-        end_time += timedelta(days=1)
-    return end_time
+            try:
+                end_dt = datetime.strptime(end_str, "%H:%M")
+            except ValueError:
+                return None
+        now = datetime.now(IST)
+        end_time = now.replace(hour=end_dt.hour, minute=end_dt.minute, second=0, microsecond=0)
+        if end_time < now:
+            end_time += timedelta(days=1)
+        return end_time
+
+    single_match = re.search(r'(\d{1,2}:\d{2}\s*(?:AM|PM)?)', content, re.IGNORECASE)
+    if single_match:
+        start_str = single_match.group(1).strip().upper()
+        try:
+            start_dt = datetime.strptime(start_str, "%I:%M %p")
+        except ValueError:
+            try:
+                start_dt = datetime.strptime(start_str, "%H:%M")
+            except ValueError:
+                return None
+        now = datetime.now(IST)
+        start_time = now.replace(hour=start_dt.hour, minute=start_dt.minute, second=0, microsecond=0)
+        if start_time < now:
+            start_time += timedelta(days=1)
+        return start_time + timedelta(hours=2)
+
+    return None
 
 async def scan_thread(thread):
     global registered_players, event_end_time, draw_done
@@ -110,6 +127,8 @@ async def scan_thread(thread):
                     event_end_time = parse_end_time(message.content)
                     save_state()
                     print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
+                    if event_end_time:
+                        print(f"End time set to: {event_end_time}")
                     return
         print(f"No reminder found in: {thread.name}")
     except Exception as e:
@@ -197,6 +216,32 @@ async def status(ctx):
     await ctx.send(
         f"Registered: {len(registered_players)} | Present in ABCD: {present} | "
         f"End time: {end_str} | Draw done: {draw_done}"
+    )
+
+@bot.command()
+async def details(ctx):
+    """Show names of registered players and who is in voice"""
+    registered_names = []
+    present_names = []
+
+    for uid in registered_players:
+        member = ctx.guild.get_member(uid)
+        name = member.display_name if member else f"User {uid}"
+        registered_names.append(name)
+
+    for vc_id in VOICE_CHANNELS:
+        vc = bot.get_channel(vc_id)
+        if vc and isinstance(vc, discord.VoiceChannel):
+            for member in vc.members:
+                if member.id in registered_players:
+                    present_names.append(f"{member.display_name} ({vc.name})")
+
+    reg_text = ", ".join(registered_names) if registered_names else "None"
+    present_text = ", ".join(present_names) if present_names else "None"
+
+    await ctx.send(
+        f"**Registered ({len(registered_names)}):** {reg_text}\n"
+        f"**Present in ABCD ({len(present_names)}):** {present_text}"
     )
 
 @bot.command()
