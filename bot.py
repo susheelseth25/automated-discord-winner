@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import random
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import os
 import re
 import json
@@ -101,7 +101,7 @@ def parse_end_time(content: str):
     return start_time + timedelta(minutes=90)
 
 async def scan_recent_events():
-    global event_end_time, draw_done
+    global event_end_time, draw_done, registered_players
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
@@ -118,8 +118,19 @@ async def scan_recent_events():
                         f"⏰ **Found recent event.** End time set to {end_str} (start + 90 min)"
                     )
                     print(f"Startup scan set end time to: {end_time}")
-                    return
-        print("No recent Apollo event with a time found")
+                    break
+
+        try:
+            threads = await channel.guild.active_threads()
+            for thread in threads:
+                if thread.parent_id == APOLLO_CHANNEL_ID:
+                    print(f"Scanning active thread on startup: {thread.name}")
+                    await thread.join()
+                    await asyncio.sleep(3)
+                    await scan_thread(thread)
+        except Exception as e:
+            print(f"Error scanning active threads: {e}")
+
     except Exception as e:
         print(f"Startup scan error: {e}")
 
@@ -181,9 +192,9 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
+    # Detect new Apollo event posts while bot is running
     if (message.channel.id == APOLLO_CHANNEL_ID and 
-        message.author.id == APOLLO_BOT_ID and 
-        ("TEAM" in message.content.upper() or "Time" in message.content)):
+        message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
         if end_time:
             event_end_time = end_time
@@ -193,7 +204,7 @@ async def on_message(message):
             await message.channel.send(
                 f"⏰ **Event detected.** End time set to {end_str} (start + 90 min)"
             )
-            print(f"Early end time set to: {end_time}")
+            print(f"Live event detected. End time set to: {end_time}")
 
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
         print(f"Apollo started a thread message detected: {message.content}")
