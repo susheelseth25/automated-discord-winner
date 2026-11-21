@@ -113,9 +113,8 @@ async def scan_recent_events():
                     event_end_time = end_time
                     draw_done = False
                     save_state()
-                    end_str = end_time.strftime("%H:%M")
                     await channel.send(
-                        f"⏰ **Found recent event.** End time set to {end_str} (start + 90 min)"
+                        "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
                     )
                     print(f"Startup scan set end time to: {end_time}")
                     break
@@ -138,26 +137,26 @@ async def announce_capture(count, end_time):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
-    end_str = end_time.strftime("%H:%M") if end_time else "Not set"
     await channel.send(
-        f"✅ **Captured {count} registered players** from the new thread.\n"
-        f"End time: {end_str}"
+        f"✅ **Captured {count} registered players.**\n"
+        f"Lucky draw result is set to 90 minutes from event start time."
     )
 
 async def scan_thread(thread):
     global registered_players, event_end_time, draw_done
     try:
-        async for message in thread.history(limit=10):
+        print(f"Scanning thread: {thread.name}")
+        async for message in thread.history(limit=15):
+            print(f"  Message from {message.author}: mentions={len(message.mentions)} content preview={message.content[:80]}")
             if message.author.id == APOLLO_BOT_ID and message.mentions:
-                if "REMINDER" in message.content.upper() or "STARTING" in message.content.upper():
-                    registered_players = {m.id for m in message.mentions}
-                    draw_done = False
-                    event_end_time = parse_end_time(message.content)
-                    save_state()
-                    print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
-                    await announce_capture(len(registered_players), event_end_time)
-                    return
-        print(f"No reminder found in: {thread.name}")
+                registered_players = {m.id for m in message.mentions}
+                draw_done = False
+                event_end_time = parse_end_time(message.content) or event_end_time
+                save_state()
+                print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
+                await announce_capture(len(registered_players), event_end_time)
+                return
+        print(f"No tagged message found in: {thread.name}")
     except Exception as e:
         print(f"Scan error for {thread.name}: {e}")
 
@@ -192,7 +191,6 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
-    # Detect new Apollo event posts while bot is running
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
@@ -200,9 +198,8 @@ async def on_message(message):
             event_end_time = end_time
             draw_done = False
             save_state()
-            end_str = end_time.strftime("%H:%M")
             await message.channel.send(
-                f"⏰ **Event detected.** End time set to {end_str} (start + 90 min)"
+                "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
             )
             print(f"Live event detected. End time set to: {end_time}")
 
