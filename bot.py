@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import json
@@ -22,6 +22,7 @@ VOICE_CHANNELS = [
 
 MIN_PLAYERS = 12
 STATE_FILE = "bot_state.json"
+MSK = timezone(timedelta(hours=3))
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -37,6 +38,9 @@ event_end_time = None
 draw_done = False
 current_draw_number = 0
 draw_history = []
+
+def now_msk():
+    return datetime.now(MSK)
 
 def save_state():
     data = {
@@ -102,7 +106,7 @@ def parse_end_time(content: str):
         except ValueError:
             return None
 
-    now = datetime.now()
+    now = now_msk()
     start_time = now.replace(hour=start_dt.hour, minute=start_dt.minute, second=0, microsecond=0)
     if start_time < now:
         start_time += timedelta(days=1)
@@ -156,7 +160,7 @@ async def announce_capture(count):
         return
     await channel.send(
         f"✅ **Draw #{current_draw_number}** — Captured {count} registered players.\n"
-        f"Lucky draw result is set to 60 minutes from event start time."
+        f"Lucky draw result is set to 60 minutes from event start time (MSK)."
     )
 
 async def process_thread_updates(thread):
@@ -209,7 +213,7 @@ async def track_voice_presence():
     global present_during_event
     if not registered_players or draw_done or not event_end_time:
         return
-    now = datetime.now()
+    now = now_msk()
     if now > event_end_time:
         return
     for vc_id in VOICE_CHANNELS:
@@ -280,7 +284,7 @@ async def check_event_end():
     await track_voice_presence()
     if not registered_players or draw_done or not event_end_time:
         return
-    now = datetime.now()
+    now = now_msk()
     if now >= event_end_time:
         await run_draw()
 
@@ -322,7 +326,7 @@ async def run_draw():
         "registered": len(registered_players),
         "present": len(present),
         "winners": winners_list,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": now_msk().isoformat()
     })
     if len(draw_history) > 50:
         draw_history = draw_history[-50:]
@@ -356,12 +360,14 @@ async def status(ctx):
         vc = bot.get_channel(vc_id)
         if vc and isinstance(vc, discord.VoiceChannel):
             voice_count += len(vc.members)
-    end_str = event_end_time.strftime("%H:%M") if event_end_time else "Not set"
+    end_str = event_end_time.strftime("%H:%M MSK") if event_end_time else "Not set"
+    start_str = (event_end_time - timedelta(minutes=60)).strftime("%H:%M MSK") if event_end_time else "Not set"
     await ctx.send(
         f"**Draw #{current_draw_number}**\n"
+        f"Start time: {start_str}\n"
+        f"End time: {end_str}\n"
         f"Registered: {len(registered_players)} | In Voice now: {voice_count} | "
-        f"Present during event: {len(present_during_event)} | "
-        f"End time: {end_str} | Draw done: {draw_done}"
+        f"Present during event: {len(present_during_event)} | Draw done: {draw_done}"
     )
 
 @bot.command()
@@ -407,7 +413,7 @@ async def history(ctx, number: int = None):
                 winners = ", ".join(d["winners"]) if d["winners"] else "None"
                 await ctx.send(
                     f"**Draw #{d['draw_number']}**\n"
-                    f"Time: {d['start_time']} – {d['end_time']}\n"
+                    f"Time: {d['start_time']} – {d['end_time']} MSK\n"
                     f"Registered: {d['registered']} | Present: {d['present']}\n"
                     f"Winners: {winners}"
                 )
@@ -419,7 +425,7 @@ async def history(ctx, number: int = None):
     for d in reversed(draw_history[-5:]):
         winners = ", ".join(d["winners"]) if d["winners"] else "None"
         lines.append(
-            f"Draw #{d['draw_number']} | {d['start_time']}–{d['end_time']} | "
+            f"Draw #{d['draw_number']} | {d['start_time']}–{d['end_time']} MSK | "
             f"Reg: {d['registered']} | Present: {d['present']} | Winners: {winners}"
         )
     await ctx.send("\n".join(lines))
