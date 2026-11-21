@@ -193,8 +193,6 @@ async def scan_thread(thread):
                 best_message = message
 
         if best_message and max_mentions >= 2:
-            if not registered_players:
-                start_new_draw()
             registered_players = {m.id for m in best_message.mentions}
             draw_done = False
             event_end_time = parse_end_time(best_message.content) or event_end_time
@@ -254,14 +252,15 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
+    # Every new Apollo event message starts a fresh draw
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
-        if end_time and event_end_time != end_time:
+        if end_time:
             start_new_draw()
             event_end_time = end_time
             save_state()
-            print(f"Live event detected — Draw #{current_draw_number}")
+            print(f"New event detected — Draw #{current_draw_number}")
 
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
         print(f"Apollo started a thread: {message.content}")
