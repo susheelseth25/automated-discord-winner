@@ -67,7 +67,12 @@ def load_state():
         registered_players = set(data.get("registered_players", []))
         present_during_event = set(data.get("present_during_event", []))
         end_str = data.get("event_end_time")
-        event_end_time = datetime.fromisoformat(end_str) if end_str else None
+        if end_str:
+            event_end_time = datetime.fromisoformat(end_str)
+            if event_end_time.tzinfo is None:
+                event_end_time = event_end_time.replace(tzinfo=MSK)
+        else:
+            event_end_time = None
         draw_done = data.get("draw_done", False)
         current_draw_number = data.get("current_draw_number", 0)
         draw_history = data.get("draw_history", [])
@@ -250,7 +255,6 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
-    # Only start a new draw from main channel event detection
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
@@ -279,12 +283,12 @@ async def on_message(message):
 async def check_event_end():
     global draw_done
     await track_voice_presence()
+    now = now_msk()
+    print(f"CHECK | now={now.strftime('%H:%M MSK')} | end={event_end_time} | registered={len(registered_players)} | done={draw_done}")
     if not registered_players or draw_done or not event_end_time:
         return
-    now = now_msk()
-    print(f"Checking draw: now={now}, end={event_end_time}, done={draw_done}")
     if now >= event_end_time:
-        print("End time reached. Running draw...")
+        print("END TIME REACHED — running draw")
         await run_draw()
 
 async def run_draw():
