@@ -116,9 +116,6 @@ async def scan_recent_events():
                     event_end_time = end_time
                     draw_done = False
                     save_state()
-                    await channel.send(
-                        "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
-                    )
                     print("Startup scan set end time")
                     break
 
@@ -242,9 +239,6 @@ async def on_message(message):
             event_end_time = end_time
             draw_done = False
             save_state()
-            await message.channel.send(
-                "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
-            )
             print("Live event detected")
 
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
