@@ -101,12 +101,12 @@ def parse_end_time(content: str):
     return start_time + timedelta(minutes=90)
 
 async def scan_recent_events():
-    global event_end_time, draw_done, registered_players
+    global event_end_time, draw_done
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
     try:
-        async for message in channel.history(limit=50):
+        async for message in channel.history(limit=30):
             if message.author.id == APOLLO_BOT_ID:
                 end_time = parse_end_time(message.content)
                 if end_time:
@@ -116,24 +116,25 @@ async def scan_recent_events():
                     await channel.send(
                         "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
                     )
-                    print(f"Startup scan set end time to: {end_time}")
+                    print("Startup scan set end time")
                     break
 
         try:
             threads = await channel.guild.active_threads()
-            for thread in threads:
-                if thread.parent_id == APOLLO_CHANNEL_ID:
-                    print(f"Scanning active thread on startup: {thread.name}")
-                    await thread.join()
-                    await asyncio.sleep(3)
-                    await scan_thread(thread)
+            apollo_threads = [t for t in threads if t.parent_id == APOLLO_CHANNEL_ID]
+            if apollo_threads:
+                newest = max(apollo_threads, key=lambda t: t.created_at or datetime.min)
+                print(f"Scanning newest thread only: {newest.name}")
+                await newest.join()
+                await asyncio.sleep(3)
+                await scan_thread(newest)
         except Exception as e:
-            print(f"Error scanning active threads: {e}")
+            print(f"Error scanning newest thread: {e}")
 
     except Exception as e:
         print(f"Startup scan error: {e}")
 
-async def announce_capture(count, end_time):
+async def announce_capture(count):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
@@ -147,14 +148,13 @@ async def scan_thread(thread):
     try:
         print(f"Scanning thread: {thread.name}")
         async for message in thread.history(limit=15):
-            print(f"  Message from {message.author}: mentions={len(message.mentions)} content preview={message.content[:80]}")
             if message.author.id == APOLLO_BOT_ID and message.mentions:
                 registered_players = {m.id for m in message.mentions}
                 draw_done = False
                 event_end_time = parse_end_time(message.content) or event_end_time
                 save_state()
                 print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
-                await announce_capture(len(registered_players), event_end_time)
+                await announce_capture(len(registered_players))
                 return
         print(f"No tagged message found in: {thread.name}")
     except Exception as e:
@@ -171,12 +171,11 @@ async def on_ready():
 
 @bot.event
 async def on_thread_create(thread):
-    print(f"on_thread_create fired: {thread.name}")
     if thread.parent_id != APOLLO_CHANNEL_ID:
         return
     try:
         await thread.join()
-        print(f"Joined thread: {thread.name}")
+        print(f"Joined new thread: {thread.name}")
         await asyncio.sleep(10)
         await scan_thread(thread)
     except Exception as e:
@@ -201,23 +200,22 @@ async def on_message(message):
             await message.channel.send(
                 "⏰ **Lucky draw result is set to 90 minutes from event start time.**"
             )
-            print(f"Live event detected. End time set to: {end_time}")
+            print("Live event detected")
 
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
-        print(f"Apollo started a thread message detected: {message.content}")
+        print(f"Apollo started a thread: {message.content}")
         channel = bot.get_channel(APOLLO_CHANNEL_ID)
         if channel:
             try:
                 threads = await channel.guild.active_threads()
-                for thread in threads:
-                    if thread.parent_id == APOLLO_CHANNEL_ID:
-                        print(f"Found active thread: {thread.name}")
-                        await thread.join()
-                        await asyncio.sleep(8)
-                        await scan_thread(thread)
-                        break
+                apollo_threads = [t for t in threads if t.parent_id == APOLLO_CHANNEL_ID]
+                if apollo_threads:
+                    newest = max(apollo_threads, key=lambda t: t.created_at or datetime.min)
+                    await newest.join()
+                    await asyncio.sleep(8)
+                    await scan_thread(newest)
             except Exception as e:
-                print(f"Error fetching threads: {e}")
+                print(f"Error on new thread: {e}")
 
 @tasks.loop(minutes=1)
 async def check_event_end():
