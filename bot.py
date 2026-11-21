@@ -32,12 +32,14 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 registered_players = set()
+present_during_event = set()
 event_end_time = None
 draw_done = False
 
 def save_state():
     data = {
         "registered_players": list(registered_players),
+        "present_during_event": list(present_during_event),
         "event_end_time": event_end_time.isoformat() if event_end_time else None,
         "draw_done": draw_done
     }
@@ -48,17 +50,18 @@ def save_state():
         print("Failed to save state:", e)
 
 def load_state():
-    global registered_players, event_end_time, draw_done
+    global registered_players, present_during_event, event_end_time, draw_done
     if not os.path.exists(STATE_FILE):
         return
     try:
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
         registered_players = set(data.get("registered_players", []))
+        present_during_event = set(data.get("present_during_event", []))
         end_str = data.get("event_end_time")
         event_end_time = datetime.fromisoformat(end_str) if end_str else None
         draw_done = data.get("draw_done", False)
-        print(f"Loaded state: {len(registered_players)} players")
+        print(f"Loaded state: {len(registered_players)} registered, {len(present_during_event)} present")
     except Exception as e:
         print("Failed to load state:", e)
 
@@ -153,11 +156,9 @@ async def process_thread_updates(thread):
             if "added" in content and message.mentions:
                 for m in message.mentions:
                     registered_players.add(m.id)
-                print(f"Added: {[m.display_name for m in message.mentions]}")
             elif "removed" in content and message.mentions:
                 for m in message.mentions:
                     registered_players.discard(m.id)
-                print(f"Removed: {[m.display_name for m in message.mentions]}")
         save_state()
     except Exception as e:
         print(f"Error processing updates in {thread.name}: {e}")
@@ -181,7 +182,6 @@ async def scan_thread(thread):
             print(f"Initial capture: {len(registered_players)} players")
 
             await process_thread_updates(thread)
-
             save_state()
             await announce_capture(len(registered_players))
             return
@@ -189,6 +189,21 @@ async def scan_thread(thread):
         print(f"No bulk tagged message found in: {thread.name}")
     except Exception as e:
         print(f"Scan error for {thread.name}: {e}")
+
+async def track_voice_presence():
+    global present_during_event
+    if not registered_players or draw_done or not event_end_time:
+        return
+    now = datetime.now()
+    if now > event_end_time:
+        return
+    for vc_id in VOICE_CHANNELS:
+        vc = bot.get_channel(vc_id)
+        if vc and isinstance(vc, discord.VoiceChannel):
+            for member in vc.members:
+                if member.id in registered_players:
+                    present_during_event.add(member.id)
+    save_state()
 
 @bot.event
 async def on_ready():
@@ -250,6 +265,7 @@ async def on_message(message):
 @tasks.loop(minutes=1)
 async def check_event_end():
     global draw_done
+    await track_voice_presence()
     if not registered_players or draw_done or not event_end_time:
         return
     now = datetime.now()
@@ -257,34 +273,33 @@ async def check_event_end():
         await run_draw()
 
 async def run_draw():
-    global registered_players, draw_done
+    global registered_players, draw_done, present_during_event
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
 
-    present = set()
-    for vc_id in VOICE_CHANNELS:
-        vc = bot.get_channel(vc_id)
-        if vc and isinstance(vc, discord.VoiceChannel):
-            for member in vc.members:
-                if member.id in registered_players:
-                    present.add(member)
+    present = []
+    for uid in present_during_event:
+        member = channel.guild.get_member(uid)
+        if member:
+            present.append(member)
 
     if len(present) < MIN_PLAYERS:
         await channel.send(
             f"Event ended. Only {len(present)} registered players were in voice "
-            f"(minimum required: {MIN_PLAYERS}). No winners posted."
+            f"during the event (minimum required: {MIN_PLAYERS}). No winners posted."
         )
     else:
         winners_count = max(1, len(present) // 3)
-        winners = random.sample(list(present), min(winners_count, len(present)))
+        winners = random.sample(present, min(winners_count, len(present)))
         mentions = " ".join(w.mention for w in winners)
         await channel.send(
             f"🎉 **Event Winners** 🎉\n"
-            f"Valid players in voice: {len(present)}\n"
+            f"Players who joined voice: {len(present)}\n"
             f"Winners ({winners_count}): {mentions}"
         )
     draw_done = True
+    present_during_event.clear()
     save_state()
 
 @bot.command()
@@ -314,7 +329,8 @@ async def status(ctx):
             voice_count += len(vc.members)
     end_str = event_end_time.strftime("%H:%M") if event_end_time else "Not set"
     await ctx.send(
-        f"Registered: {len(registered_players)} | In Voice (ABCD): {voice_count} | "
+        f"Registered: {len(registered_players)} | In Voice now: {voice_count} | "
+        f"Present during event: {len(present_during_event)} | "
         f"End time: {end_str} | Draw done: {draw_done}"
     )
 
@@ -335,9 +351,17 @@ async def details(ctx):
                 voice_names.append(f"{member.display_name} ({vc.name})")
     voice_text = ", ".join(voice_names) if voice_names else "None"
 
+    present_names = []
+    for uid in present_during_event:
+        member = ctx.guild.get_member(uid)
+        name = member.display_name if member else f"User {uid}"
+        present_names.append(name)
+    present_text = ", ".join(present_names) if present_names else "None"
+
     await ctx.send(
         f"**Registered ({len(registered_names)}):** {reg_text}\n"
-        f"**In Voice ABCD ({len(voice_names)}):** {voice_text}"
+        f"**In Voice now ({len(voice_names)}):** {voice_text}\n"
+        f"**Present during event ({len(present_names)}):** {present_text}"
     )
 
 @bot.command()
@@ -357,8 +381,9 @@ async def forcedraw(ctx):
 
 @bot.command()
 async def reset(ctx):
-    global registered_players, event_end_time, draw_done
+    global registered_players, present_during_event, event_end_time, draw_done
     registered_players = set()
+    present_during_event = set()
     event_end_time = None
     draw_done = False
     save_state()
