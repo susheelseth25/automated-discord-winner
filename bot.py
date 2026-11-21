@@ -123,7 +123,7 @@ def start_new_draw():
     print(f"Started new draw #{current_draw_number}")
 
 async def scan_recent_events():
-    global event_end_time, draw_done
+    global event_end_time
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
@@ -132,8 +132,6 @@ async def scan_recent_events():
             if message.author.id == APOLLO_BOT_ID:
                 end_time = parse_end_time(message.content)
                 if end_time:
-                    if event_end_time != end_time:
-                        start_new_draw()
                     event_end_time = end_time
                     save_state()
                     print("Startup scan set end time")
@@ -252,11 +250,11 @@ async def on_message(message):
     if not message.author.bot:
         await bot.process_commands(message)
 
-    # Every new Apollo event message starts a fresh draw
+    # Only start a new draw from main channel event detection
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
-        if end_time:
+        if end_time and (event_end_time is None or abs((end_time - event_end_time).total_seconds()) > 300):
             start_new_draw()
             event_end_time = end_time
             save_state()
@@ -284,7 +282,9 @@ async def check_event_end():
     if not registered_players or draw_done or not event_end_time:
         return
     now = now_msk()
+    print(f"Checking draw: now={now}, end={event_end_time}, done={draw_done}")
     if now >= event_end_time:
+        print("End time reached. Running draw...")
         await run_draw()
 
 async def run_draw():
