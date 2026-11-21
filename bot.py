@@ -143,20 +143,50 @@ async def announce_capture(count):
         f"Lucky draw result is set to 90 minutes from event start time."
     )
 
+async def process_thread_updates(thread):
+    global registered_players
+    try:
+        async for message in thread.history(limit=30):
+            if message.author.id != APOLLO_BOT_ID:
+                continue
+            content = message.content.lower()
+            if "added" in content and message.mentions:
+                for m in message.mentions:
+                    registered_players.add(m.id)
+                print(f"Added: {[m.display_name for m in message.mentions]}")
+            elif "removed" in content and message.mentions:
+                for m in message.mentions:
+                    registered_players.discard(m.id)
+                print(f"Removed: {[m.display_name for m in message.mentions]}")
+        save_state()
+    except Exception as e:
+        print(f"Error processing updates in {thread.name}: {e}")
+
 async def scan_thread(thread):
     global registered_players, event_end_time, draw_done
     try:
         print(f"Scanning thread: {thread.name}")
-        async for message in thread.history(limit=15):
-            if message.author.id == APOLLO_BOT_ID and message.mentions:
-                registered_players = {m.id for m in message.mentions}
-                draw_done = False
-                event_end_time = parse_end_time(message.content) or event_end_time
-                save_state()
-                print(f"CAPTURED {len(registered_players)} players from thread: {thread.name}")
-                await announce_capture(len(registered_players))
-                return
-        print(f"No tagged message found in: {thread.name}")
+        best_message = None
+        max_mentions = 0
+
+        async for message in thread.history(limit=20):
+            if message.author.id == APOLLO_BOT_ID and len(message.mentions) > max_mentions:
+                max_mentions = len(message.mentions)
+                best_message = message
+
+        if best_message and max_mentions >= 2:
+            registered_players = {m.id for m in best_message.mentions}
+            draw_done = False
+            event_end_time = parse_end_time(best_message.content) or event_end_time
+            print(f"Initial capture: {len(registered_players)} players")
+
+            await process_thread_updates(thread)
+
+            save_state()
+            await announce_capture(len(registered_players))
+            return
+
+        print(f"No bulk tagged message found in: {thread.name}")
     except Exception as e:
         print(f"Scan error for {thread.name}: {e}")
 
