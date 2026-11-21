@@ -35,13 +35,17 @@ registered_players = set()
 present_during_event = set()
 event_end_time = None
 draw_done = False
+current_draw_number = 0
+draw_history = []
 
 def save_state():
     data = {
         "registered_players": list(registered_players),
         "present_during_event": list(present_during_event),
         "event_end_time": event_end_time.isoformat() if event_end_time else None,
-        "draw_done": draw_done
+        "draw_done": draw_done,
+        "current_draw_number": current_draw_number,
+        "draw_history": draw_history
     }
     try:
         with open(STATE_FILE, "w") as f:
@@ -50,7 +54,7 @@ def save_state():
         print("Failed to save state:", e)
 
 def load_state():
-    global registered_players, present_during_event, event_end_time, draw_done
+    global registered_players, present_during_event, event_end_time, draw_done, current_draw_number, draw_history
     if not os.path.exists(STATE_FILE):
         return
     try:
@@ -61,7 +65,9 @@ def load_state():
         end_str = data.get("event_end_time")
         event_end_time = datetime.fromisoformat(end_str) if end_str else None
         draw_done = data.get("draw_done", False)
-        print(f"Loaded state: {len(registered_players)} registered, {len(present_during_event)} present")
+        current_draw_number = data.get("current_draw_number", 0)
+        draw_history = data.get("draw_history", [])
+        print(f"Loaded state: Draw #{current_draw_number}, {len(registered_players)} registered")
     except Exception as e:
         print("Failed to load state:", e)
 
@@ -101,7 +107,16 @@ def parse_end_time(content: str):
     if start_time < now:
         start_time += timedelta(days=1)
 
-    return start_time + timedelta(minutes=90)
+    return start_time + timedelta(minutes=60)
+
+def start_new_draw():
+    global current_draw_number, registered_players, present_during_event, draw_done
+    current_draw_number += 1
+    registered_players = set()
+    present_during_event = set()
+    draw_done = False
+    save_state()
+    print(f"Started new draw #{current_draw_number}")
 
 async def scan_recent_events():
     global event_end_time, draw_done
@@ -113,8 +128,9 @@ async def scan_recent_events():
             if message.author.id == APOLLO_BOT_ID:
                 end_time = parse_end_time(message.content)
                 if end_time:
+                    if event_end_time != end_time:
+                        start_new_draw()
                     event_end_time = end_time
-                    draw_done = False
                     save_state()
                     print("Startup scan set end time")
                     break
@@ -139,8 +155,8 @@ async def announce_capture(count):
     if not channel:
         return
     await channel.send(
-        f"✅ **Captured {count} registered players.**\n"
-        f"Lucky draw result is set to 90 minutes from event start time."
+        f"✅ **Draw #{current_draw_number}** — Captured {count} registered players.\n"
+        f"Lucky draw result is set to 60 minutes from event start time."
     )
 
 async def process_thread_updates(thread):
@@ -173,10 +189,12 @@ async def scan_thread(thread):
                 best_message = message
 
         if best_message and max_mentions >= 2:
+            if not registered_players:
+                start_new_draw()
             registered_players = {m.id for m in best_message.mentions}
             draw_done = False
             event_end_time = parse_end_time(best_message.content) or event_end_time
-            print(f"Initial capture: {len(registered_players)} players")
+            print(f"Initial capture: {len(registered_players)} players for Draw #{current_draw_number}")
 
             await process_thread_updates(thread)
             save_state()
@@ -235,11 +253,11 @@ async def on_message(message):
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
-        if end_time:
+        if end_time and event_end_time != end_time:
+            start_new_draw()
             event_end_time = end_time
-            draw_done = False
             save_state()
-            print("Live event detected")
+            print(f"Live event detected — Draw #{current_draw_number}")
 
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
         print(f"Apollo started a thread: {message.content}")
@@ -267,7 +285,7 @@ async def check_event_end():
         await run_draw()
 
 async def run_draw():
-    global registered_players, draw_done, present_during_event
+    global registered_players, draw_done, present_during_event, draw_history
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if not channel:
         return
@@ -278,31 +296,48 @@ async def run_draw():
         if member:
             present.append(member)
 
+    start_time = (event_end_time - timedelta(minutes=60)).strftime("%H:%M") if event_end_time else "Unknown"
+    end_time_str = event_end_time.strftime("%H:%M") if event_end_time else "Unknown"
+
     if len(present) < MIN_PLAYERS:
-        await channel.send(
-            f"Event ended. Only {len(present)} registered players were in voice "
-            f"during the event (minimum required: {MIN_PLAYERS}). No winners posted."
-        )
+        result = f"**Draw #{current_draw_number}** ended.\nOnly {len(present)} registered players were in voice during the event (minimum required: {MIN_PLAYERS}). No winners posted."
+        winners_list = []
     else:
         winners_count = max(1, len(present) // 3)
         winners = random.sample(present, min(winners_count, len(present)))
         mentions = " ".join(w.mention for w in winners)
-        await channel.send(
-            f"🎉 **Event Winners** 🎉\n"
+        winners_list = [w.display_name for w in winners]
+        result = (
+            f"🎉 **Draw #{current_draw_number} Winners** 🎉\n"
             f"Players who joined voice: {len(present)}\n"
             f"Winners ({winners_count}): {mentions}"
         )
+
+    await channel.send(result)
+
+    draw_history.append({
+        "draw_number": current_draw_number,
+        "start_time": start_time,
+        "end_time": end_time_str,
+        "registered": len(registered_players),
+        "present": len(present),
+        "winners": winners_list,
+        "timestamp": datetime.now().isoformat()
+    })
+    if len(draw_history) > 50:
+        draw_history = draw_history[-50:]
+
     draw_done = True
     present_during_event.clear()
     save_state()
 
 @bot.command()
 async def connect(ctx):
-    await ctx.send("Connected! Bot is online and responding.")
+    await ctx.send(f"Connected! Bot is online. Current Draw: #{current_draw_number}")
 
 @bot.command()
 async def stop(ctx):
-    await ctx.send("🛑 Bot is stopping...")
+    await ctx.send(f"🛑 Draw #{current_draw_number} — Bot is stopping...")
     await bot.close()
 
 @bot.command()
@@ -311,7 +346,7 @@ async def start(ctx):
 
 @bot.command()
 async def restart(ctx):
-    await ctx.send("🔄 Bot is restarting... Ask bot admin to restart webserver.")
+    await ctx.send(f"🔄 Draw #{current_draw_number} — Bot is restarting... Ask bot admin to restart webserver.")
     await bot.close()
 
 @bot.command()
@@ -323,6 +358,7 @@ async def status(ctx):
             voice_count += len(vc.members)
     end_str = event_end_time.strftime("%H:%M") if event_end_time else "Not set"
     await ctx.send(
+        f"**Draw #{current_draw_number}**\n"
         f"Registered: {len(registered_players)} | In Voice now: {voice_count} | "
         f"Present during event: {len(present_during_event)} | "
         f"End time: {end_str} | Draw done: {draw_done}"
@@ -353,10 +389,40 @@ async def details(ctx):
     present_text = ", ".join(present_names) if present_names else "None"
 
     await ctx.send(
+        f"**Draw #{current_draw_number}**\n"
         f"**Registered ({len(registered_names)}):** {reg_text}\n"
         f"**In Voice now ({len(voice_names)}):** {voice_text}\n"
         f"**Present during event ({len(present_names)}):** {present_text}"
     )
+
+@bot.command()
+async def history(ctx, number: int = None):
+    if not draw_history:
+        await ctx.send("No draw history yet.")
+        return
+
+    if number is not None:
+        for d in draw_history:
+            if d["draw_number"] == number:
+                winners = ", ".join(d["winners"]) if d["winners"] else "None"
+                await ctx.send(
+                    f"**Draw #{d['draw_number']}**\n"
+                    f"Time: {d['start_time']} – {d['end_time']}\n"
+                    f"Registered: {d['registered']} | Present: {d['present']}\n"
+                    f"Winners: {winners}"
+                )
+                return
+        await ctx.send(f"Draw #{number} not found.")
+        return
+
+    lines = ["**Last 5 draws:**"]
+    for d in reversed(draw_history[-5:]):
+        winners = ", ".join(d["winners"]) if d["winners"] else "None"
+        lines.append(
+            f"Draw #{d['draw_number']} | {d['start_time']}–{d['end_time']} | "
+            f"Reg: {d['registered']} | Present: {d['present']} | Winners: {winners}"
+        )
+    await ctx.send("\n".join(lines))
 
 @bot.command()
 async def voices(ctx):
@@ -367,10 +433,11 @@ async def voices(ctx):
             lines.append(f"✅ {vc.name} — {len(vc.members)} member(s)")
         else:
             lines.append(f"❌ Cannot see channel ID {vc_id}")
-    await ctx.send("**Voice Channel Access:**\n" + "\n".join(lines))
+    await ctx.send(f"**Draw #{current_draw_number}** — Voice Channel Access:\n" + "\n".join(lines))
 
 @bot.command()
 async def forcedraw(ctx):
+    await ctx.send(f"Running Draw #{current_draw_number} manually...")
     await run_draw()
 
 @bot.command()
@@ -381,7 +448,7 @@ async def reset(ctx):
     event_end_time = None
     draw_done = False
     save_state()
-    await ctx.send("State reset.")
+    await ctx.send(f"Draw #{current_draw_number} state reset.")
 
 if __name__ == "__main__":
     bot.run(TOKEN)
