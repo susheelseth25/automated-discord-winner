@@ -258,7 +258,7 @@ async def on_message(message):
     if (message.channel.id == APOLLO_CHANNEL_ID and 
         message.author.id == APOLLO_BOT_ID):
         end_time = parse_end_time(message.content)
-        if end_time and (event_end_time is None or abs((end_time - event_end_time).total_seconds()) > 300):
+        if end_time:
             start_new_draw()
             event_end_time = end_time
             save_state()
@@ -376,88 +376,4 @@ async def status(ctx):
 @bot.command()
 async def details(ctx):
     registered_names = []
-    for uid in registered_players:
-        member = ctx.guild.get_member(uid)
-        name = member.display_name if member else f"User {uid}"
-        registered_names.append(name)
-    reg_text = ", ".join(registered_names) if registered_names else "None"
-
-    voice_names = []
-    for vc_id in VOICE_CHANNELS:
-        vc = bot.get_channel(vc_id)
-        if vc and isinstance(vc, discord.VoiceChannel):
-            for member in vc.members:
-                voice_names.append(f"{member.display_name} ({vc.name})")
-    voice_text = ", ".join(voice_names) if voice_names else "None"
-
-    present_names = []
-    for uid in present_during_event:
-        member = ctx.guild.get_member(uid)
-        name = member.display_name if member else f"User {uid}"
-        present_names.append(name)
-    present_text = ", ".join(present_names) if present_names else "None"
-
-    await ctx.send(
-        f"**Draw #{current_draw_number}**\n"
-        f"**Registered ({len(registered_names)}):** {reg_text}\n"
-        f"**In Voice now ({len(voice_names)}):** {voice_text}\n"
-        f"**Present during event ({len(present_names)}):** {present_text}"
-    )
-
-@bot.command()
-async def history(ctx, number: int = None):
-    if not draw_history:
-        await ctx.send("No draw history yet.")
-        return
-
-    if number is not None:
-        for d in draw_history:
-            if d["draw_number"] == number:
-                winners = ", ".join(d["winners"]) if d["winners"] else "None"
-                await ctx.send(
-                    f"**Draw #{d['draw_number']}**\n"
-                    f"Time: {d['start_time']} – {d['end_time']} MSK\n"
-                    f"Registered: {d['registered']} | Present: {d['present']}\n"
-                    f"Winners: {winners}"
-                )
-                return
-        await ctx.send(f"Draw #{number} not found.")
-        return
-
-    lines = ["**Last 5 draws:**"]
-    for d in reversed(draw_history[-5:]):
-        winners = ", ".join(d["winners"]) if d["winners"] else "None"
-        lines.append(
-            f"Draw #{d['draw_number']} | {d['start_time']}–{d['end_time']} MSK | "
-            f"Reg: {d['registered']} | Present: {d['present']} | Winners: {winners}"
-        )
-    await ctx.send("\n".join(lines))
-
-@bot.command()
-async def voices(ctx):
-    lines = []
-    for vc_id in VOICE_CHANNELS:
-        vc = bot.get_channel(vc_id)
-        if vc and isinstance(vc, discord.VoiceChannel):
-            lines.append(f"✅ {vc.name} — {len(vc.members)} member(s)")
-        else:
-            lines.append(f"❌ Cannot see channel ID {vc_id}")
-    await ctx.send(f"**Draw #{current_draw_number}** — Voice Channel Access:\n" + "\n".join(lines))
-
-@bot.command()
-async def forcedraw(ctx):
-    await ctx.send(f"Running Draw #{current_draw_number} manually...")
-    await run_draw()
-
-@bot.command()
-async def reset(ctx):
-    global registered_players, present_during_event, event_end_time, draw_done
-    registered_players = set()
-    present_during_event = set()
-    event_end_time = None
-    draw_done = False
-    save_state()
-    await ctx.send(f"Draw #{current_draw_number} state reset.")
-
-if __name__ == "__main__":
-    bot.run(TOKEN)
+    for
