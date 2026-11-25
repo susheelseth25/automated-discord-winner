@@ -115,6 +115,13 @@ def parse_end_time(content: str):
         start_time += timedelta(days=1)
     return start_time + timedelta(minutes=60)
 
+def get_times():
+    if not event_end_time:
+        return "Not set", "Not set"
+    start = (event_end_time - timedelta(minutes=60)).strftime("%H:%M MSK")
+    end = event_end_time.strftime("%H:%M MSK")
+    return start, end
+
 def start_new_draw():
     global current_draw_number, registered_players, present_during_event, draw_done
     current_draw_number += 1
@@ -150,8 +157,10 @@ async def scan_recent_events():
 async def announce_capture(count):
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if channel:
+        start, end = get_times()
         await channel.send(
             f"✅ **Draw #{current_draw_number}** — Captured {count} registered players.\n"
+            f"Start: {start} | End: {end}\n"
             f"Lucky draw result will be posted in <#{REWARDS_CHANNEL_ID}>."
         )
 
@@ -241,8 +250,10 @@ async def on_message(message):
             save_state()
             channel = bot.get_channel(APOLLO_CHANNEL_ID)
             if channel:
+                start, end = get_times()
                 await channel.send(
                     f"⏰ **Draw #{current_draw_number}** started.\n"
+                    f"Start: {start} | End: {end}\n"
                     f"Results will be posted in <#{REWARDS_CHANNEL_ID}>."
                 )
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
@@ -282,11 +293,14 @@ async def run_draw():
         if member:
             present.append(member)
 
+    start, end = get_times()
+
     if len(present) < MIN_PLAYERS:
         result = (
             f"**Draw #{current_draw_number}** ended.\n"
-            f"Only {len(present)} registered players were in voice during the event "
-            f"(minimum required: {MIN_PLAYERS}). No winners posted."
+            f"Start: {start} | End: {end}\n"
+            f"Registered: {len(registered_players)} | Present in voice: {len(present)}\n"
+            f"Only {len(present)} registered players were in voice (minimum required: {MIN_PLAYERS}). No winners posted."
         )
         winners_list = []
     else:
@@ -296,17 +310,18 @@ async def run_draw():
         winners_list = [w.display_name for w in winners]
         result = (
             f"🎉 **Draw #{current_draw_number} Winners** 🎉\n"
-            f"Players who joined voice: {len(present)}\n"
+            f"Start: {start} | End: {end}\n"
+            f"Registered: {len(registered_players)} | Present in voice: {len(present)}\n"
             f"Winners ({winners_count}): {mentions}"
         )
 
     await rewards_channel.send(result)
 
-    # Also notify in main channel
     main_channel = bot.get_channel(APOLLO_CHANNEL_ID)
     if main_channel:
         await main_channel.send(
-            f"✅ **Draw #{current_draw_number}** result has been posted in <#{REWARDS_CHANNEL_ID}>."
+            f"✅ **Draw #{current_draw_number}** result posted in <#{REWARDS_CHANNEL_ID}>.\n"
+            f"Start: {start} | End: {end}"
         )
 
     draw_history.append({
@@ -325,20 +340,25 @@ async def connect(ctx):
 
 @bot.command()
 async def status(ctx):
-    end_str = event_end_time.strftime("%H:%M MSK") if event_end_time else "Not set"
+    start, end = get_times()
     await ctx.send(
         f"**Draw #{current_draw_number}**\n"
-        f"End time: {end_str}\n"
+        f"Start: {start} | End: {end}\n"
         f"Registered: {len(registered_players)} | Present: {len(present_during_event)} | Done: {draw_done}"
     )
 
 @bot.command()
 async def details(ctx):
+    start, end = get_times()
     names = []
     for uid in registered_players:
         m = ctx.guild.get_member(uid)
         names.append(m.display_name if m else str(uid))
-    await ctx.send(f"**Draw #{current_draw_number}**\nRegistered: {', '.join(names) or 'None'}")
+    await ctx.send(
+        f"**Draw #{current_draw_number}**\n"
+        f"Start: {start} | End: {end}\n"
+        f"Registered ({len(names)}): {', '.join(names) or 'None'}"
+    )
 
 @bot.command()
 async def history(ctx, number: int = None):
