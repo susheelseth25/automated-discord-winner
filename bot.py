@@ -11,6 +11,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = os.getenv("TOKEN")
 APOLLO_CHANNEL_ID = 1158100032248086619
+REWARDS_CHANNEL_ID = 1480554579467698176
 APOLLO_BOT_ID = 475744554910351370
 
 VOICE_CHANNELS = [
@@ -151,7 +152,7 @@ async def announce_capture(count):
     if channel:
         await channel.send(
             f"✅ **Draw #{current_draw_number}** — Captured {count} registered players.\n"
-            f"Lucky draw result is set to 60 minutes from event start time (MSK)."
+            f"Lucky draw result will be posted in <#{REWARDS_CHANNEL_ID}>."
         )
 
 async def process_thread_updates(thread):
@@ -238,6 +239,12 @@ async def on_message(message):
             global event_end_time
             event_end_time = end_time
             save_state()
+            channel = bot.get_channel(APOLLO_CHANNEL_ID)
+            if channel:
+                await channel.send(
+                    f"⏰ **Draw #{current_draw_number}** started.\n"
+                    f"Results will be posted in <#{REWARDS_CHANNEL_ID}>."
+                )
     if message.author.id == APOLLO_BOT_ID and "started a thread" in message.content.lower():
         channel = bot.get_channel(APOLLO_CHANNEL_ID)
         if channel:
@@ -264,24 +271,44 @@ async def check_event_end():
 
 async def run_draw():
     global draw_done, present_during_event, draw_history
-    channel = bot.get_channel(APOLLO_CHANNEL_ID)
-    if not channel:
+    rewards_channel = bot.get_channel(REWARDS_CHANNEL_ID)
+    if not rewards_channel:
+        print("Rewards channel not found")
         return
+
     present = []
     for uid in present_during_event:
-        member = channel.guild.get_member(uid)
+        member = rewards_channel.guild.get_member(uid)
         if member:
             present.append(member)
+
     if len(present) < MIN_PLAYERS:
-        result = f"**Draw #{current_draw_number}** ended.\nOnly {len(present)} registered players were in voice during the event (minimum required: {MIN_PLAYERS}). No winners posted."
+        result = (
+            f"**Draw #{current_draw_number}** ended.\n"
+            f"Only {len(present)} registered players were in voice during the event "
+            f"(minimum required: {MIN_PLAYERS}). No winners posted."
+        )
         winners_list = []
     else:
         winners_count = max(1, len(present) // 3)
         winners = random.sample(present, min(winners_count, len(present)))
         mentions = " ".join(w.mention for w in winners)
         winners_list = [w.display_name for w in winners]
-        result = f"🎉 **Draw #{current_draw_number} Winners** 🎉\nPlayers who joined voice: {len(present)}\nWinners ({winners_count}): {mentions}"
-    await channel.send(result)
+        result = (
+            f"🎉 **Draw #{current_draw_number} Winners** 🎉\n"
+            f"Players who joined voice: {len(present)}\n"
+            f"Winners ({winners_count}): {mentions}"
+        )
+
+    await rewards_channel.send(result)
+
+    # Also notify in main channel
+    main_channel = bot.get_channel(APOLLO_CHANNEL_ID)
+    if main_channel:
+        await main_channel.send(
+            f"✅ **Draw #{current_draw_number}** result has been posted in <#{REWARDS_CHANNEL_ID}>."
+        )
+
     draw_history.append({
         "draw_number": current_draw_number,
         "registered": len(registered_players),
@@ -299,7 +326,11 @@ async def connect(ctx):
 @bot.command()
 async def status(ctx):
     end_str = event_end_time.strftime("%H:%M MSK") if event_end_time else "Not set"
-    await ctx.send(f"**Draw #{current_draw_number}**\nEnd time: {end_str}\nRegistered: {len(registered_players)} | Present: {len(present_during_event)} | Done: {draw_done}")
+    await ctx.send(
+        f"**Draw #{current_draw_number}**\n"
+        f"End time: {end_str}\n"
+        f"Registered: {len(registered_players)} | Present: {len(present_during_event)} | Done: {draw_done}"
+    )
 
 @bot.command()
 async def details(ctx):
