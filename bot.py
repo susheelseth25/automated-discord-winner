@@ -273,6 +273,7 @@ async def on_message(message):
 @tasks.loop(minutes=1)
 async def check_event_end():
     await track_voice_presence()
+    save_state()
     now = now_msk()
     print(f"CHECK | now={now.strftime('%H:%M')} | end={event_end_time} | done={draw_done}")
     if not registered_players or draw_done or not event_end_time:
@@ -400,7 +401,6 @@ async def cancel(ctx):
     present_during_event = set()
     event_end_time = None
     save_state()
-    # Prepare for next draw
     start_new_draw()
 
 @bot.command()
