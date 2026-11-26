@@ -131,6 +131,12 @@ def start_new_draw():
     save_state()
     print(f"Started new draw #{current_draw_number}")
 
+async def finish_pending_draw_if_needed():
+    """On startup, finish any previous draw whose end time has already passed."""
+    if event_end_time and not draw_done and now_msk() >= event_end_time:
+        print("Finishing pending draw from previous run")
+        await run_draw()
+
 async def scan_recent_events():
     global event_end_time
     channel = bot.get_channel(APOLLO_CHANNEL_ID)
@@ -219,6 +225,7 @@ async def track_voice_presence():
 async def on_ready():
     print(f"Logged in as {bot.user}")
     load_state()
+    await finish_pending_draw_if_needed()
     if not check_event_end.is_running():
         check_event_end.start()
     await scan_recent_events()
