@@ -379,6 +379,31 @@ async def forcedraw(ctx):
     await run_draw()
 
 @bot.command()
+async def cancel(ctx):
+    global draw_done, registered_players, present_during_event, event_end_time, draw_history
+    if current_draw_number == 0:
+        await ctx.send("No active draw to cancel.")
+        return
+    start, end = get_times()
+    await ctx.send(
+        f"❌ **Draw #{current_draw_number}** has been cancelled.\n"
+        f"Start: {start} | End: {end}"
+    )
+    draw_history.append({
+        "draw_number": current_draw_number,
+        "registered": len(registered_players),
+        "present": len(present_during_event),
+        "winners": ["CANCELLED"]
+    })
+    draw_done = True
+    registered_players = set()
+    present_during_event = set()
+    event_end_time = None
+    save_state()
+    # Prepare for next draw
+    start_new_draw()
+
+@bot.command()
 async def reset(ctx):
     global registered_players, present_during_event, event_end_time, draw_done
     registered_players = set()
